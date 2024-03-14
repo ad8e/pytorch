@@ -60,8 +60,8 @@ class TestCompiledAutograd(TestCase):
 
     def test_do_not_land_test_ci_segfault(self):
         def fn():
-            x = torch.randn(1000, 3000, device="cuda")
-            w = torch.randn(1000, 3000, requires_grad=True, device="cuda")
+            x = torch.randn(1000, 3000)
+            w = torch.randn(1000, 3000, requires_grad=True)
 
             def model(i):
                 return torch.nn.functional.linear(i, w)
