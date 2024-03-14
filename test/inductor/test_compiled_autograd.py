@@ -58,22 +58,27 @@ class TestCompiledAutograd(TestCase):
             self.assertEqual(counters["compiled_autograd"]["captures"], count)
             self.assertEqual(counters["compiled_autograd"]["compiles"], count)
 
-    def test_do_not_land_test_ci_segfault(self):
-        def fn():
-            x = torch.randn(1000, 3000)
-            w = torch.randn(1000, 3000, requires_grad=True)
+    def test_dynamo_reset(self):
+        def inner():
+            def fn():
+                x = torch.randn(1000, 3000)
+                w = torch.randn(1000, 3000, requires_grad=True)
 
-            def model(i):
-                return torch.nn.functional.linear(i, w)
+                def model(i):
+                    return torch.nn.functional.linear(i, w)
 
-            out = model(x)
-            loss = out.sum()
-            with torch._dynamo.compiled_autograd.enable(compiler_fn):
-                loss.backward()
+                out = model(x)
+                loss = out.sum()
+                with torch._dynamo.compiled_autograd.enable(compiler_fn):
+                    loss.backward()
 
-            yield w.grad
+                yield w.grad
 
-        self.check_output_and_recompiles(fn)
+            self.check_output_and_recompiles(fn)
+
+        inner()
+        torch._dynamo.reset()
+        inner()
 
     def test_basic(self):
         def fn():
