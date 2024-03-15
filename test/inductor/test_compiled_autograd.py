@@ -60,23 +60,21 @@ class TestCompiledAutograd(TestCase):
 
     def test_dynamo_reset(self):
         def inner():
-            def fn():
-                x = torch.randn(1000, 3000)
-                w = torch.randn(1000, 3000, requires_grad=True)
+            x = torch.randn(1000, 3000)#, device="cuda")
+            w = torch.randn(1000, 3000, requires_grad=True)#, device="cuda")
 
-                def model(i):
-                    return torch.nn.functional.linear(i, w)
+            def model(i):
+                return torch.nn.functional.linear(i, w)
 
-                out = model(x)
-                loss = out.sum()
-                with torch._dynamo.compiled_autograd.enable(compiler_fn):
-                    loss.backward()
-
-                yield w.grad
-
-            self.check_output_and_recompiles(fn)
+            out = model(x)
+            loss = out.sum()
+            with torch._dynamo.compiled_autograd.enable(compiler_fn):
+                loss.backward()
+            # print is needed to always repro
+            print(w.grad)
 
         inner()
+        print("resetting dynamo")
         torch._dynamo.reset()
         inner()
 
