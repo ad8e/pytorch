@@ -262,7 +262,7 @@ class TritonTemplateKernel(TritonKernel):
             val = self.named_input_nodes[name].get_stride()[index]
         return texpr(self.rename_indexing(val))
 
-    def store_output(self, indices, val, mask):
+    def store_output(self, indices, val, mask, mode=None):
         """
         Hook called from template code to store the final output
         (if the buffer hasn't been optimized away), then append any
@@ -271,7 +271,7 @@ class TritonTemplateKernel(TritonKernel):
         assert isinstance(indices, (list, tuple))
         assert isinstance(val, str)
         assert isinstance(mask, str)
-        assert self.template_mask is None
+        assert self.template_mask is None or self.template_mask == mask
         indices = list(map(TritonPrinter.paren, indices))
         index_symbols = [sympy.Symbol(x) for x in indices]
         lengths = [V.graph.sizevars.simplify(s) for s in self.output_node.get_size()]
@@ -309,6 +309,7 @@ class TritonTemplateKernel(TritonKernel):
             self.output_node.get_name(),
             output_index,
             self.epilogue_fn(*epilogue_args),
+            mode,
         )
         self.codegen_body()
 
@@ -317,7 +318,6 @@ class TritonTemplateKernel(TritonKernel):
             self.codegen_body()
             return textwrap.indent(self.body.getvalue(), "    ").strip()
 
-        assert "<STORE_OUTPUT>" not in self.render_hooks
         self.render_hooks["<STORE_OUTPUT>"] = hook
         return "<STORE_OUTPUT>"
 
@@ -575,6 +575,11 @@ class TritonTemplate(KernelTemplate):
             output_tensor_meta=TensorMeta.from_irnodes(layout),
         )
 
+        can_fuse = True
+        # cannot fuse epilog into a mm kernel with atomic_add.
+        if self.name == "mm" and kwargs.get("SPLIT_K", 1) > 1:
+            can_fuse = False
+
         return TritonTemplateCaller(
             kernel_hash_name,
             input_nodes,
@@ -595,6 +600,7 @@ class TritonTemplate(KernelTemplate):
                 "allow_tf32": str(kwargs.get("ALLOW_TF32", None)),
                 "acc_type": str(kwargs.get("ACC_TYPE", None)),
             },
+            can_fuse=can_fuse,
         )
 
 
@@ -665,6 +671,7 @@ class TritonTemplateCaller(ChoiceCaller):
         log_info: Optional[
             Dict[str, Union[PrimitiveInfoType, List[PrimitiveInfoType]]]
         ] = None,
+        can_fuse=True,
     ):
         super().__init__(name, input_nodes, layout)
         self.make_kernel_render = make_kernel_render
@@ -681,6 +688,7 @@ class TritonTemplateCaller(ChoiceCaller):
                 "num_warps": self.bmreq.num_warps,
             }
         )
+        self.can_fuse = can_fuse
 
     def benchmark(self, *args, out):
         assert self.bmreq is not None
@@ -706,6 +714,7 @@ class TritonTemplateCaller(ChoiceCaller):
                 layout=self.layout,
                 inputs=self.input_nodes,
                 make_kernel_render=self.make_kernel_render,
+                can_fuse=self.can_fuse,
             )
         )
 
