@@ -46,6 +46,7 @@ from ..utils import decode_device, is_pointwise_use
 from ..virtualized import V
 from .group_batch_fusion import group_batch_fusion_passes
 from .reinplace import reinplace_inplaceable_ops
+from torch._functorch._aot_autograd import fsdp_fx_passes
 
 log = logging.getLogger(__name__)
 aten = torch.ops.aten
@@ -106,6 +107,15 @@ def post_grad_passes(gm: torch.fx.GraphModule, is_inference: bool):
     # Keep these last, since they introduces mutation. Look at
     # ./fx_passes/README.md for a discussion of mutation invariants.
     reinplace_inplaceable_ops(gm.graph)
+    fsdp_fx_passes.replace_noop_consecutive_permutes_with_original_input_if_first_permute_out_has_no_other_use(gm)
+    fsdp_fx_passes.remove_clone_if_input_has_no_other_use_in_graph(gm)
+    fsdp_fx_passes.remove_inplace_copy_into_the_same_buffer(gm)
+    fsdp_fx_passes.if_inplace_copy_output_has_no_other_use_and_is_then_resized_to_0_then_use_this_output_buffer_to_replace_all_occurrence_of_the_input(gm)
+    gm.graph.eliminate_dead_code()
+    fsdp_fx_passes.dedup_resize_to_same_size(gm)
+    # TODO(yf225): enable these two and fix crash
+    # fsdp_fx_passes.remove_all_slice_and_slice_scatter_following_split_with_sizes_and_inplace_copy(gm)
+    # gm.graph.eliminate_dead_code()
     decompose_auto_functionalized(gm.graph)
 
     gm.recompile()

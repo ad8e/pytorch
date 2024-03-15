@@ -120,8 +120,8 @@ def init():
         nn.Linear(hidden_dim, hidden_dim, device=device_type),
         nn.ReLU(),
         nn.Linear(hidden_dim, hidden_dim, device=device_type),  # FC->RELU->FC is a good test
-        nn.ReLU(),
-        nn.Linear(hidden_dim, hidden_dim, device=device_type),
+        # nn.ReLU(),
+        # nn.Linear(hidden_dim, hidden_dim, device=device_type),
     )
     if per_param_fsdp:
         torch.distributed._composable.fsdp.fully_shard(model, reshard_after_forward=True)
