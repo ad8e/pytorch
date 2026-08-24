@@ -1145,9 +1145,8 @@ class AOTAutogradCacheTests(CacheKeyEquivalenceMixin, InductorTestCase):
         def run_and_grad(func, x):
             output, auxiliary = func(x)
             grad_output = torch.linspace(0.5, 1.5, output.numel(), device=x.device)
-            # auxiliary.sum() feeds a zero tangent into grad_auxiliary while the
-            # output tangent is nonzero, so a cache entry that lost the
-            # mark_non_differentiable metadata shows up in grad.
+            # If mark_non_differentiable metadata is lost, auxiliary.sum()
+            # contributes a nonzero grad_auxiliary and changes grad.
             loss = (output * grad_output).sum() + auxiliary.sum()
             (grad,) = torch.autograd.grad(loss, x)
             self.assertTrue(torch._C._is_alias_of(output, x))
@@ -4015,6 +4014,27 @@ class AOTAutogradCachePicklerTests(torch._dynamo.test_case.TestCase):
         self.assertRaises(
             BypassAOTAutogradCache, lambda: self.gen_cache_key(fn, config)
         )
+
+    @functorch_config.patch({"autograd_cache_allow_custom_autograd_functions": False})
+    def test_custom_autograd_function_disabled_bypasses(self):
+        class MyAutogradFunction(torch.autograd.Function):
+            @staticmethod
+            def forward(ctx, x):
+                return x.sin()
+
+            @staticmethod
+            def backward(ctx, grad_output):
+                return grad_output * 2
+
+        def fn(x):
+            return MyAutogradFunction.apply(x)
+
+        with self.assertRaisesRegex(BypassAOTAutogradCache, "autograd_function_apply"):
+            self.gen_cache_key(
+                fn,
+                self.default_config(),
+                inputs=[torch.ones(3, requires_grad=True)],
+            )
 
     @functorch_config.patch({"autograd_cache_allow_custom_autograd_functions": True})
     def test_custom_autograd_function_with_incompatible_nested_function(self):
