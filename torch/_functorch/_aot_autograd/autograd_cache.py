@@ -313,10 +313,18 @@ def check_cacheable(gm: torch.fx.GraphModule) -> None:
         raise BypassAOTAutogradCache(
             "Won't cache a graph with fakify_first_call enabled"
         )
-    # HOP bodies are registered as child GraphModules and affect compiled behavior.
-    for module in _iter_graph_modules(gm):
+    # Nested GraphModules, including HOP bodies and saved-tensor-hook subgraphs
+    # attached without graph nodes, affect compiled behavior.
+    for module_name, module in gm.named_modules():
+        if not isinstance(module, torch.fx.GraphModule):
+            continue
         for node in module.graph.nodes:
-            check_node_safe(node)
+            try:
+                check_node_safe(node)
+            except BypassAOTAutogradCache as e:
+                if not module_name:
+                    raise
+                raise BypassAOTAutogradCache(f"Subgraph {module_name}: {e}") from e
 
 
 def _get_context_fn_cache_hash(context_fn: Callable[..., Any]) -> str | None:

@@ -84,7 +84,7 @@ device_type = (
 
 
 @torch._dynamo.allow_in_graph
-def _opaque_custom_autograd_backward(grad):
+def _opaque_unsupported_function(grad):
     return grad * 2
 
 
@@ -4015,6 +4015,36 @@ class AOTAutogradCachePicklerTests(torch._dynamo.test_case.TestCase):
             BypassAOTAutogradCache, lambda: self.gen_cache_key(fn, config)
         )
 
+    def test_incompatible_nested_graph_module(self):
+        example = torch.ones(3)
+
+        inner_graph = torch.fx.Graph()
+        inner_x = inner_graph.placeholder("x")
+        inner_x.meta["example_value"] = example
+        inner_result = inner_graph.call_function(
+            _opaque_unsupported_function, (inner_x,)
+        )
+        inner_result.meta["example_value"] = example
+        inner_graph.output(inner_result)
+        inner = GraphModule(torch.nn.Module(), inner_graph)
+
+        root = torch.nn.Module()
+        root.body = inner
+        outer_graph = torch.fx.Graph()
+        outer_x = outer_graph.placeholder("x")
+        outer_x.meta["example_value"] = example
+        outer_result = outer_graph.call_module("body", (outer_x,))
+        outer_result.meta["example_value"] = example
+        outer_graph.output(outer_result)
+        outer = GraphModule(root, outer_graph)
+
+        with self.assertRaisesRegex(
+            BypassAOTAutogradCache,
+            r"Subgraph body: Unsupported call_function target .*"
+            r"_opaque_unsupported_function",
+        ):
+            check_cacheable(outer)
+
     @functorch_config.patch({"autograd_cache_allow_custom_autograd_functions": False})
     def test_custom_autograd_function_disabled_bypasses(self):
         class MyAutogradFunction(torch.autograd.Function):
@@ -4045,7 +4075,7 @@ class AOTAutogradCachePicklerTests(torch._dynamo.test_case.TestCase):
 
             @staticmethod
             def backward(ctx, grad_output):
-                return _opaque_custom_autograd_backward(grad_output)
+                return _opaque_unsupported_function(grad_output)
 
         def fn(x):
             return MyAutogradFunction.apply(x)
@@ -4053,7 +4083,8 @@ class AOTAutogradCachePicklerTests(torch._dynamo.test_case.TestCase):
         config = self.default_config()
         with self.assertRaisesRegex(
             BypassAOTAutogradCache,
-            r"Unsupported call_function target .*_opaque_custom_autograd_backward",
+            r"Subgraph bwd_body_\d+: Unsupported call_function target .*"
+            r"_opaque_unsupported_function",
         ):
             self.gen_cache_key(fn, config, inputs=[torch.ones(3, requires_grad=True)])
 
