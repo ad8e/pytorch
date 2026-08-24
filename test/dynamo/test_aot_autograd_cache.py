@@ -3740,6 +3740,53 @@ class AOTAutogradCachePicklerTests(torch._dynamo.test_case.TestCase):
             c2 = self.gen_cache_key(fn, config)
         self.assertNotEqual(c1, c2)
 
+    def test_custom_autograd_cache_admission_does_not_change_key(self):
+        def fn(x):
+            return x.cos().sin()
+
+        config = self.default_config()
+        with functorch_config.patch(
+            {"autograd_cache_allow_custom_autograd_functions": False}
+        ):
+            disabled_key, _ = self.gen_cache_key(fn, config)
+        with functorch_config.patch(
+            {"autograd_cache_allow_custom_autograd_functions": True}
+        ):
+            enabled_key, _ = self.gen_cache_key(fn, config)
+
+        self.assertEqual(disabled_key, enabled_key)
+
+    def test_custom_autograd_cache_admission_controls_eligibility(self):
+        class MyAutogradFunction(torch.autograd.Function):
+            @staticmethod
+            def forward(ctx, x):
+                return x.sin()
+
+            @staticmethod
+            def backward(ctx, grad_output):
+                return grad_output * 2
+
+        def fn(x):
+            return MyAutogradFunction.apply(x)
+
+        config = self.default_config()
+        inputs = [torch.ones(3, requires_grad=True)]
+        with (
+            functorch_config.patch(
+                {"autograd_cache_allow_custom_autograd_functions": False}
+            ),
+            self.assertRaisesRegex(
+                BypassAOTAutogradCache, "autograd_function_apply"
+            ),
+        ):
+            self.gen_cache_key(fn, config, inputs=inputs)
+
+        with functorch_config.patch(
+            {"autograd_cache_allow_custom_autograd_functions": True}
+        ):
+            enabled_key, _ = self.gen_cache_key(fn, config, inputs=inputs)
+        self.assertIsInstance(enabled_key, str)
+
     def test_incompatible_function(self):
         @torch._dynamo.allow_in_graph
         class AllowInGraphFunc(torch.autograd.Function):
