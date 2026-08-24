@@ -20,6 +20,8 @@ from torch.utils._config_module import Config, install_config_module
 
 # [@compile_ignored: debug]
 _save_config_ignore = [
+    # Admission-only: checked before cache key construction.
+    "autograd_cache_allow_custom_autograd_functions",
     # callable not serializable
     "joint_custom_pass",
     # callable configs with uuid() for caching, or raw callables
