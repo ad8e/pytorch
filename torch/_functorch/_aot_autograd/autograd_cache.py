@@ -385,7 +385,7 @@ def _collect_wrapped_user_cache_hashes(
 ) -> list[tuple[str, list[object]]]:
     hashes_by_module = []
     for module_name, module in _iter_named_graph_modules(gm):
-        hashes = []
+        hashes: list[object] = []
         for node in module.graph.nodes:
             # Keep user_cache_hash truthiness aligned with check_node_safe.
             if node.meta.get("is_wrapped", False) and (
